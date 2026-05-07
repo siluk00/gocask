@@ -10,7 +10,7 @@ func TestSegment(t *testing.T) {
 	path := "test_segment.log"
 	defer os.Remove(path)
 
-	seg, err := OpenSegment(path)
+	seg, err := OpenSegment(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}

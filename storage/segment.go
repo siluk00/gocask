@@ -34,7 +34,7 @@ type Segment struct {
 }
 
 func OpenSegment(path string, syncOnWrite bool) (*Segment, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +48,12 @@ func OpenSegment(path string, syncOnWrite bool) (*Segment, error) {
 // Writes to segment and returns the new offset
 func (s *Segment) Write(key, value []byte) (int64, error) {
 	data := EncodeRecord(key, value)
-	offset := s.Offset
-	_, err := s.File.Write(data)
+	dataLen := int64(len(data))
+	
+	// Atomically reserve space in the file
+	offset := atomic.AddInt64(&s.Offset, dataLen) - dataLen
+
+	_, err := s.File.WriteAt(data, offset)
 	if err != nil {
 		return 0, err
 	}
@@ -57,8 +61,6 @@ func (s *Segment) Write(key, value []byte) (int64, error) {
 	if s.syncOnWrite {
 		s.File.Sync()
 	}
-
-	s.Offset += int64(len(data))
 
 	return offset, nil
 }
