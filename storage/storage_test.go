@@ -8,13 +8,13 @@ import (
 
 func TestSegment(t *testing.T) {
 	path := "test_segment.log"
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
 	seg, err := OpenSegment(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer seg.File.Close()
+	defer func() { _ = seg.File.Close() }()
 
 	k, v := []byte("key"), []byte("value")
 	off, err := seg.Write(k, v)

@@ -11,16 +11,18 @@ import (
 
 func TestConcurrency(t *testing.T) {
 	dir := "test_concurrency_data"
-	os.RemoveAll(dir)
-	os.MkdirAll(dir, 0755)
-	defer os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir, MaxFileSize: 1024 * 1024}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Failed to open library: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	const numGoroutines = 10
 	const opsPerGoroutine = 100
@@ -66,9 +68,11 @@ func TestConcurrency(t *testing.T) {
 
 func TestSegmentRotation(t *testing.T) {
 	dir := "test_rotation_data"
-	os.RemoveAll(dir)
-	os.MkdirAll(dir, 0755)
-	defer os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	// Set a very small MaxFileSize to trigger rotation quickly
 	cfg := Config{Dir: dir, MaxFileSize: 50} 
@@ -76,7 +80,7 @@ func TestSegmentRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open library: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Perform multiple writes to trigger rotation
 	for i := 0; i < 5; i++ {

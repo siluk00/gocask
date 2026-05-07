@@ -59,7 +59,9 @@ func (s *Segment) Write(key, value []byte) (int64, error) {
 	}
 
 	if s.syncOnWrite {
-		s.File.Sync()
+		if err := s.File.Sync(); err != nil {
+			return 0, err
+		}
 	}
 
 	return offset, nil

@@ -8,15 +8,18 @@ import (
 
 func TestLibraryAPI(t *testing.T) {
 	dir := "test_library_data"
-	os.MkdirAll(dir, 0755)
-	defer os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Failed to open library: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	t.Run("Write and Read", func(t *testing.T) {
 		key := []byte("api-key")
@@ -39,7 +42,9 @@ func TestLibraryAPI(t *testing.T) {
 		key := []byte("delete-me")
 		val := []byte("temporary")
 
-		db.Put(key, val)
+		if err := db.Put(key, val); err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
 		if err := db.Delete(key); err != nil {
 			t.Errorf("Delete failed: %v", err)
 		}
