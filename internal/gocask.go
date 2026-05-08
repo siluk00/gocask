@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/siluk00/gocask/storage"
+	"github.com/siluk00/gocask/internal/storage"
 )
 
 type ConfigFlags byte
@@ -63,9 +63,9 @@ func Open(cfg Config) (*Store, error) {
 func (s *Store) Put(key, value []byte) error {
 	s.mu.Lock()
 	segment := s.segment
+	offset, err := segment.Write(key, value)
 	s.mu.Unlock()
 
-	offset, err := segment.Write(key, value)
 	if err != nil {
 		return err
 	}
@@ -77,19 +77,22 @@ func (s *Store) Put(key, value []byte) error {
 	})
 
 	if s.config.MaxFileSize > 0 && s.config.MaxFileSize <= uint32(offset) {
-		err = segment.ToReadOnly()
-		if err != nil {
-			return err
-		}
-
 		s.mu.Lock()
-		s.readonlySegments[segment.NamePath] = segment
-		dataPath := s.config.Dir + "/" + storage.GenerateSegmentName()
-		s.segment, err = storage.OpenSegment(dataPath, SyncOnWrite&s.config.Policy != 0)
-		s.mu.Unlock()
+		defer s.mu.Unlock()
 
-		if err != nil {
-			return err
+		// Re-check if the segment is still the same (another goroutine might have rotated it)
+		if segment.NamePath == s.segment.NamePath {
+			err = segment.ToReadOnly()
+			if err != nil {
+				return err
+			}
+
+			s.readonlySegments[segment.NamePath] = segment
+			dataPath := s.config.Dir + "/" + storage.GenerateSegmentName()
+			s.segment, err = storage.OpenSegment(dataPath, SyncOnWrite&s.config.Policy != 0)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -125,12 +128,12 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 func (s *Store) Delete(key []byte) error {
 	s.mu.Lock()
 	segment := s.segment
-	s.mu.Unlock()
-
 	_, err := segment.Write(key, nil)
+	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
+
 	s.keydir.Delete(string(key))
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -31,6 +32,7 @@ type Segment struct {
 	Offset      int64
 	NamePath    string
 	syncOnWrite bool
+	mu          sync.RWMutex
 }
 
 func OpenSegment(path string, syncOnWrite bool) (*Segment, error) {
@@ -49,9 +51,12 @@ func OpenSegment(path string, syncOnWrite bool) (*Segment, error) {
 func (s *Segment) Write(key, value []byte) (int64, error) {
 	data := EncodeRecord(key, value)
 	dataLen := int64(len(data))
-	
+
 	// Atomically reserve space in the file
 	offset := atomic.AddInt64(&s.Offset, dataLen) - dataLen
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	_, err := s.File.WriteAt(data, offset)
 	if err != nil {
@@ -70,6 +75,10 @@ func (s *Segment) Write(key, value []byte) (int64, error) {
 // returns key, value and error
 func (s *Segment) ReadAt(offset int64) ([]byte, []byte, error) {
 	header := make([]byte, HeaderSize)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if _, err := s.File.ReadAt(header, offset); err != nil {
 		return nil, nil, err
 	}
@@ -84,6 +93,9 @@ func (s *Segment) ReadAt(offset int64) ([]byte, []byte, error) {
 }
 
 func (s *Segment) ToReadOnly() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	err := s.File.Close()
 	if err != nil {
 		return err

@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/siluk00/gocask"
+	"github.com/siluk00/gocask/internal"
 )
 
 func main() {
