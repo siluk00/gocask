@@ -11,7 +11,7 @@ func TestPutAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{
 		Dir: dir,
@@ -20,7 +20,7 @@ func TestPutAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	key := []byte("hello")
 	val := []byte("world")
@@ -43,14 +43,14 @@ func TestDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	key := []byte("delete-me")
 	val := []byte("temporary-value")
@@ -74,14 +74,14 @@ func TestMultiplePuts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	data := map[string]string{
 		"k1": "v1",
@@ -111,14 +111,14 @@ func TestNonExistentKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Get([]byte("not-here"))
 	if err == nil {
@@ -131,14 +131,14 @@ func TestPutOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := Config{Dir: dir}
 	db, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	key := []byte("overwrite-key")
 	val1 := []byte("value-1")
