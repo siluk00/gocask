@@ -55,3 +55,40 @@ func TestLibraryAPI(t *testing.T) {
 		}
 	})
 }
+
+func TestPersistence(t *testing.T) {
+	dir, err := os.MkdirTemp("", "gocask-test-persistence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	cfg := Config{Dir: dir, MaxFileSize: 1024}
+
+	// 1. Initial write
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Failed to open: %v", err)
+	}
+	
+	_ = db.Put([]byte("key1"), []byte("val1"))
+	_ = db.Put([]byte("key2"), []byte("val2"))
+	_ = db.Delete([]byte("key1"))
+	_ = db.Close()
+
+	// 2. Re-open and verify
+	db2, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Failed to re-open: %v", err)
+	}
+	defer func() { _ = db2.Close() }()
+
+	if _, err := db2.Get([]byte("key1")); err == nil {
+		t.Error("key1 should be deleted")
+	}
+
+	val2, err := db2.Get([]byte("key2"))
+	if err != nil || !bytes.Equal(val2, []byte("val2")) {
+		t.Errorf("key2 mismatch: %v", err)
+	}
+}

@@ -50,16 +50,42 @@ func Open(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 
+	keydir := storage.NewKeydir()
+	if err := storage.Recover(cfg.Dir, keydir); err != nil {
+		return nil, err
+	}
+
+	readonlySegments := make(map[string]*storage.Segment)
+	files, err := os.ReadDir(cfg.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, f := range files {
+		if !f.IsDir() && (len(f.Name()) > 4 && f.Name()[len(f.Name())-4:] == ".seg") {
+			path := cfg.Dir + "/" + f.Name()
+			seg, err := storage.OpenSegment(path, SyncOnWrite&cfg.Policy != 0)
+			if err != nil {
+				return nil, err
+			}
+			if err := seg.ToReadOnly(); err != nil {
+				return nil, err
+			}
+			readonlySegments[path] = seg
+		}
+	}
+
 	dataPath := cfg.Dir + "/" + storage.GenerateSegmentName()
 	seg, err := storage.OpenSegment(dataPath, SyncOnWrite&cfg.Policy != 0)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
 	}
+
 	return &Store{
 		config:           cfg,
 		segment:          seg,
-		readonlySegments: make(map[string]*storage.Segment),
-		keydir:           storage.NewKeydir(),
+		readonlySegments: readonlySegments,
+		keydir:           keydir,
 	}, nil
 }
 
@@ -120,7 +146,7 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 	s.mu.RUnlock()
 
 	if seg == nil {
-		return nil, fmt.Errorf("segment not found")
+		return nil, ErrKeyNotFound
 	}
 
 	_, value, err := seg.ReadAt(entry.Offset)

@@ -10,6 +10,7 @@ import (
 const (
 	HeaderSize   = 4 + 8 + 4 + 4 // crc + timestamp + keySize + valSize
 	TombstoneBit = uint32(1) << 31
+	HintSize     = 8 + 4 + 4 + 8 // timestamp + keySize + valSize + offset
 )
 
 type Record struct {
@@ -88,10 +89,55 @@ func DecodeRecord(data []byte) (*Record, error) {
 	}, nil
 }
 
+type Hint struct {
+	Timestamp int64
+	KeySize   uint32
+	ValSize   uint32
+	Offset    int64
+	Key       []byte
+}
+
+func EncodeHint(h Hint) []byte {
+	buf := make([]byte, HintSize+len(h.Key))
+	binary.LittleEndian.PutUint64(buf[0:], uint64(h.Timestamp))
+	binary.LittleEndian.PutUint32(buf[8:], h.KeySize)
+	binary.LittleEndian.PutUint32(buf[12:], h.ValSize)
+	binary.LittleEndian.PutUint64(buf[16:], uint64(h.Offset))
+	copy(buf[HintSize:], h.Key)
+	return buf
+}
+
+func DecodeHint(data []byte) (*Hint, error) {
+	if len(data) < HintSize {
+		return nil, fmt.Errorf("data too short for hint")
+	}
+
+	ts := int64(binary.LittleEndian.Uint64(data[0:8]))
+	kSize := binary.LittleEndian.Uint32(data[8:12])
+	vSize := binary.LittleEndian.Uint32(data[12:16])
+	off := int64(binary.LittleEndian.Uint64(data[16:24]))
+
+	if uint32(len(data)) < HintSize+kSize {
+		return nil, fmt.Errorf("data too short for hint key")
+	}
+
+	key := make([]byte, kSize)
+	copy(key, data[HintSize:HintSize+kSize])
+
+	return &Hint{
+		Timestamp: ts,
+		KeySize:   kSize,
+		ValSize:   vSize,
+		Offset:    off,
+		Key:       key,
+	}, nil
+}
+
 type Metadata struct {
 	Version        uint32
 	CompactionDone bool
 	ClosedCleanly  bool
+	HintDone       bool
 	ActiveSeg      string
 	LastCompaction int64
 	CreatedAt      int64
@@ -112,6 +158,9 @@ func EncodeMetadata(m Metadata) []byte {
 	}
 	if m.ClosedCleanly {
 		flags |= 2
+	}
+	if m.HintDone {
+		flags |= 4
 	}
 	buf[8] = flags
 	buf[9] = m.ConfigFlags
@@ -159,6 +208,7 @@ func DecodeMetadata(data []byte) (*Metadata, error) {
 		Version:        version,
 		CompactionDone: flags&1 != 0,
 		ClosedCleanly:  flags&2 != 0,
+		HintDone:       flags&4 != 0,
 		ActiveSeg:      activeSeg,
 		LastCompaction: lastComp,
 		CreatedAt:      created,

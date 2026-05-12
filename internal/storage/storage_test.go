@@ -101,3 +101,71 @@ func TestKeydir(t *testing.T) {
 		t.Error("Expected key to be deleted")
 	}
 }
+
+func TestCreateHintFilesOnInit(t *testing.T) {
+	dir, err := os.MkdirTemp("", "gocask-test-hint-init")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	// 1. Create a segment and write some data
+	seg1Path := dir + "/" + GenerateSegmentName()
+	seg1, _ := OpenSegment(seg1Path, false)
+	
+	// Key "a" = "v1"
+	_, _ = seg1.Write([]byte("a"), []byte("v1"))
+	// Key "b" = "v1"
+	_, _ = seg1.Write([]byte("b"), []byte("v1"))
+	_ = seg1.File.Close()
+
+	// 2. Create another segment with an update and a delete
+	seg2Path := dir + "/" + GenerateSegmentName()
+	seg2, _ := OpenSegment(seg2Path, false)
+	
+	// Key "a" = "v2" (update)
+	offA2, _ := seg2.Write([]byte("a"), []byte("v2"))
+	// Key "b" (delete)
+	_, _ = seg2.Write([]byte("b"), nil)
+	_ = seg2.File.Close()
+
+	// 3. Run the recovery function
+	kd := NewKeydir()
+	err = Recover(dir, kd)
+	if err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// 4. Verify Keydir state
+	// "a" should be "v2" from seg2
+	entryA, ok := kd.Get("a")
+	if !ok || entryA.Offset != offA2 || entryA.SegmentPath != seg2Path {
+		t.Errorf("Key 'a' mismatch. Got offset %d, expected %d", entryA.Offset, offA2)
+	}
+	// "b" should be deleted
+	_, ok = kd.Get("b")
+	if ok {
+		t.Error("Key 'b' should have been deleted")
+	}
+
+	// 5. Verify Hint Files exist and are valid
+	hint1Path := seg1Path[:len(seg1Path)-4] + ".hint"
+	hint2Path := seg2Path[:len(seg2Path)-4] + ".hint"
+
+	if _, err := os.Stat(hint1Path); os.IsNotExist(err) {
+		t.Error("Hint file 1 was not created")
+	}
+	if _, err := os.Stat(hint2Path); os.IsNotExist(err) {
+		t.Error("Hint file 2 was not created")
+	}
+
+	// Verify Metadata
+	metaPath := dir + "/" + GenerateMetaName()
+	meta, err := OpenMetadata(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !meta.Data.HintDone {
+		t.Error("Metadata HintDone should be true")
+	}
+}
