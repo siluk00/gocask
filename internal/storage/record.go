@@ -2,11 +2,15 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"time"
 )
 
-const HeaderSize = 4 + 8 + 4 + 4 // crc + timestamp + keySize + valSize
+const (
+	HeaderSize   = 4 + 8 + 4 + 4 // crc + timestamp + keySize + valSize
+	TombstoneBit = uint32(1) << 31
+)
 
 type Record struct {
 	CRC       uint32
@@ -17,19 +21,147 @@ type Record struct {
 	Value     []byte
 }
 
-func EncodeRecord(key, value []byte) []byte {
+func EncodeRecord(key, value []byte) ([]byte, error) {
 	kSize := uint32(len(key))
 	vSize := uint32(len(value))
+	if vSize >= TombstoneBit {
+		return nil, fmt.Errorf("value size exceeds maximum allowed size (2GB)")
+	}
 	ts := time.Now().UnixNano()
 
 	buf := make([]byte, HeaderSize+kSize+vSize)
 	binary.LittleEndian.PutUint64(buf[4:], uint64(ts))
 	binary.LittleEndian.PutUint32(buf[12:], kSize)
-	binary.LittleEndian.PutUint32(buf[16:], vSize)
+	if value != nil {
+		binary.LittleEndian.PutUint32(buf[16:], vSize)
+		copy(buf[HeaderSize+kSize:], value)
+	} else {
+		binary.LittleEndian.PutUint32(buf[16:], TombstoneBit)
+	}
 	copy(buf[HeaderSize:], key)
-	copy(buf[HeaderSize+kSize:], value)
+
+	crc := crc32.ChecksumIEEE(buf[4:])
+	binary.LittleEndian.PutUint32(buf[0:], crc)
+	return buf, nil
+}
+
+func DecodeRecord(data []byte) (*Record, error) {
+	if len(data) < HeaderSize {
+		return nil, fmt.Errorf("data too short for header")
+	}
+
+	crc := binary.LittleEndian.Uint32(data[0:4])
+	ts := int64(binary.LittleEndian.Uint64(data[4:12]))
+	kSize := binary.LittleEndian.Uint32(data[12:16])
+	vSize := binary.LittleEndian.Uint32(data[16:20])
+
+	actualCRC := crc32.ChecksumIEEE(data[4:])
+	if crc != actualCRC {
+		return nil, fmt.Errorf("CRC mismatch")
+	}
+
+	realVSize := vSize
+	if vSize == TombstoneBit {
+		realVSize = 0
+	}
+
+	if uint32(len(data)) < HeaderSize+kSize+realVSize {
+		return nil, fmt.Errorf("data too short for key/value")
+	}
+
+	key := make([]byte, kSize)
+	copy(key, data[HeaderSize:HeaderSize+kSize])
+
+	var value []byte
+	if vSize != TombstoneBit {
+		value = make([]byte, vSize)
+		copy(value, data[HeaderSize+kSize:HeaderSize+kSize+vSize])
+	}
+
+	return &Record{
+		CRC:       crc,
+		Timestamp: ts,
+		KeySize:   kSize,
+		ValSize:   vSize,
+		Key:       key,
+		Value:     value,
+	}, nil
+}
+
+type Metadata struct {
+	Version        uint32
+	CompactionDone bool
+	ClosedCleanly  bool
+	ActiveSeg      string
+	LastCompaction int64
+	CreatedAt      int64
+	ConfigFlags    byte
+}
+
+const MaxSegName = 256
+const MetaHeaderSize = 4 + 4 + 1 + 1 + 8 + 8 + 4 // 30 bytes
+
+func EncodeMetadata(m Metadata) []byte {
+	buf := make([]byte, MetaHeaderSize+MaxSegName)
+
+	binary.LittleEndian.PutUint32(buf[4:], m.Version)
+
+	var flags byte
+	if m.CompactionDone {
+		flags |= 1
+	}
+	if m.ClosedCleanly {
+		flags |= 2
+	}
+	buf[8] = flags
+	buf[9] = m.ConfigFlags
+
+	binary.LittleEndian.PutUint64(buf[10:], uint64(m.LastCompaction))
+	binary.LittleEndian.PutUint64(buf[18:], uint64(m.CreatedAt))
+
+	actualLen := len(m.ActiveSeg)
+	if actualLen > MaxSegName {
+		actualLen = MaxSegName
+	}
+	binary.LittleEndian.PutUint32(buf[26:], uint32(actualLen))
+	copy(buf[MetaHeaderSize:], m.ActiveSeg[:actualLen])
 
 	crc := crc32.ChecksumIEEE(buf[4:])
 	binary.LittleEndian.PutUint32(buf[0:], crc)
 	return buf
+}
+
+func DecodeMetadata(data []byte) (*Metadata, error) {
+	if len(data) < MetaHeaderSize+MaxSegName {
+		return nil, fmt.Errorf("data too short for metadata")
+	}
+
+	crc := binary.LittleEndian.Uint32(data[0:4])
+	actualCRC := crc32.ChecksumIEEE(data[4:])
+	if crc != actualCRC {
+		return nil, fmt.Errorf("CRC mismatch")
+	}
+
+	version := binary.LittleEndian.Uint32(data[4:8])
+	flags := data[8]
+	configFlags := data[9]
+	lastComp := int64(binary.LittleEndian.Uint64(data[10:18]))
+	created := int64(binary.LittleEndian.Uint64(data[18:26]))
+	segLen := binary.LittleEndian.Uint32(data[26:30])
+
+	if segLen > MaxSegName {
+		segLen = MaxSegName
+	}
+
+	activeSeg := string(data[MetaHeaderSize : MetaHeaderSize+segLen])
+
+	return &Metadata{
+		Version:        version,
+		CompactionDone: flags&1 != 0,
+		ClosedCleanly:  flags&2 != 0,
+		ActiveSeg:      activeSeg,
+		LastCompaction: lastComp,
+		CreatedAt:      created,
+		ConfigFlags:    configFlags,
+	}, nil
 }

@@ -13,19 +13,9 @@ var (
 	counter uint64
 	pid     = os.Getpid()
 	//host    = getHostHash()
+
+	ErrTombstone = fmt.Errorf("tombstone")
 )
-
-/*type OffBoundaryOffsetError struct {
-	AttemptedOffset int64
-	FileSize        int64
-	RequiredBytes   int64
-	SegmentName     string
-}
-
-error sent when segment offst is greater than max file size
-func (e *OffBoundaryOffsetError) Error() string {
-	return fmt.Sprintf("segment %s: write overflow - offset %d + neewded %d > file size %d", e.SegmentName, e.AttemptedOffset, e.RequiredBytes, e.FileSize)
-}*/
 
 type Segment struct {
 	File        *os.File
@@ -49,7 +39,10 @@ func OpenSegment(path string, syncOnWrite bool) (*Segment, error) {
 
 // Writes to segment and returns the new offset
 func (s *Segment) Write(key, value []byte) (int64, error) {
-	data := EncodeRecord(key, value)
+	data, err := EncodeRecord(key, value)
+	if err != nil {
+		return 0, err
+	}
 	dataLen := int64(len(data))
 
 	// Atomically reserve space in the file
@@ -58,7 +51,7 @@ func (s *Segment) Write(key, value []byte) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	_, err := s.File.WriteAt(data, offset)
+	_, err = s.File.WriteAt(data, offset)
 	if err != nil {
 		return 0, err
 	}
@@ -84,6 +77,9 @@ func (s *Segment) ReadAt(offset int64) ([]byte, []byte, error) {
 	}
 	keySize := binary.LittleEndian.Uint32(header[12:])
 	valSize := binary.LittleEndian.Uint32(header[16:])
+	if valSize == TombstoneBit {
+		return nil, nil, ErrTombstone
+	}
 
 	data := make([]byte, keySize+valSize)
 	if _, err := s.File.ReadAt(data, offset+HeaderSize); err != nil {
@@ -111,14 +107,15 @@ func (s *Segment) ToReadOnly() error {
 }
 
 func GenerateSegmentName() string {
-	counter := atomic.AddUint64(&counter, 1)
-	return fmt.Sprintf("%019d_%05d_%012d.seg", time.Now().Unix(), pid, counter)
+	c := atomic.AddUint64(&counter, 1)
+	return fmt.Sprintf("%019d_%05d_%012d.seg", time.Now().Unix(), pid, c)
 }
 
-// just in case of distributed system
-/* func getHostHash() uint32 {
-	h, _ := os.Hostname()
-	hasher := fnv.New32a()
-	hasher.Write([]byte(h))
-	return hasher.Sum32()
-} */
+func GenerateHintFileName() string {
+	c := atomic.AddUint64(&counter, 1)
+	return fmt.Sprintf("%019d_%05d_%012d.hint", time.Now().Unix(), pid, c)
+}
+
+func GenerateMetaName() string {
+	return "METAFILE"
+}

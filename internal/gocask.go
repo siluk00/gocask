@@ -14,6 +14,8 @@ const (
 	SyncOnWrite ConfigFlags = 1 << iota
 )
 
+var ErrKeyNotFound = fmt.Errorf("not found")
+
 // Bitcask defines the public API for the store.
 type Bitcask interface {
 	Put(key, value []byte) error
@@ -47,6 +49,7 @@ func Open(cfg Config) (*Store, error) {
 	if err := os.MkdirAll(cfg.Dir, 0755); err != nil {
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
+
 	dataPath := cfg.Dir + "/" + storage.GenerateSegmentName()
 	seg, err := storage.OpenSegment(dataPath, SyncOnWrite&cfg.Policy != 0)
 	if err != nil {
@@ -64,9 +67,9 @@ func (s *Store) Put(key, value []byte) error {
 	s.mu.Lock()
 	segment := s.segment
 	offset, err := segment.Write(key, value)
-	s.mu.Unlock()
 
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
@@ -75,6 +78,8 @@ func (s *Store) Put(key, value []byte) error {
 		Offset:      offset,
 		ValueSize:   uint32(len(value)),
 	})
+
+	s.mu.Unlock()
 
 	if s.config.MaxFileSize > 0 && s.config.MaxFileSize <= uint32(offset) {
 		s.mu.Lock()
@@ -102,7 +107,7 @@ func (s *Store) Put(key, value []byte) error {
 func (s *Store) Get(key []byte) ([]byte, error) {
 	entry, ok := s.keydir.Get(string(key))
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrKeyNotFound
 	}
 
 	s.mu.RLock()
@@ -120,6 +125,9 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 
 	_, value, err := seg.ReadAt(entry.Offset)
 	if err != nil {
+		if err == storage.ErrTombstone {
+			return nil, ErrKeyNotFound
+		}
 		return nil, err
 	}
 	return value, nil
@@ -127,9 +135,9 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 
 func (s *Store) Delete(key []byte) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	segment := s.segment
 	_, err := segment.Write(key, nil)
-	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
