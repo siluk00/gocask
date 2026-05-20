@@ -56,14 +56,14 @@ func DecodeRecord(data []byte) (*Record, error) {
 	kSize := binary.LittleEndian.Uint32(data[12:16])
 	vSize := binary.LittleEndian.Uint32(data[16:20])
 
-	actualCRC := crc32.ChecksumIEEE(data[4:])
-	if crc != actualCRC {
-		return nil, fmt.Errorf("CRC mismatch")
-	}
-
 	realVSize := vSize
 	if vSize == TombstoneBit {
 		realVSize = 0
+	}
+
+	actualCRC := crc32.ChecksumIEEE(data[4 : HeaderSize+kSize+realVSize])
+	if crc != actualCRC {
+		return nil, fmt.Errorf("CRC mismatch")
 	}
 
 	if uint32(len(data)) < HeaderSize+kSize+realVSize {

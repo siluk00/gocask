@@ -69,6 +69,7 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+// multuiple puts and gets in sequence, all keys must be recoverable
 func TestMultiplePuts(t *testing.T) {
 	dir, err := os.MkdirTemp("", "gocask-test-multi")
 	if err != nil {
@@ -106,7 +107,7 @@ func TestMultiplePuts(t *testing.T) {
 	}
 }
 
-func TestNonExistentKey(t *testing.T) {
+func TestDeleteNonExistentKey(t *testing.T) {
 	dir, err := os.MkdirTemp("", "gocask-test-nonexistent")
 	if err != nil {
 		t.Fatal(err)
@@ -158,5 +159,72 @@ func TestPutOverwrite(t *testing.T) {
 	}
 	if !bytes.Equal(got, val2) {
 		t.Errorf("Expected %s, got %s", val2, got)
+	}
+}
+
+// It should be put and get as an empty value, not "not founbd error"
+func TestPutEmptyValue(t *testing.T) {
+	dir, err := os.MkdirTemp("", "gocask-test-empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	cfg := Config{Dir: dir}
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	key := []byte("empty-key")
+	val := []byte("") // Empty value
+
+	if err := db.Put(key, val); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	got, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Expected empty value, got %s", got)
+	}
+}
+
+// put with key and values of like 64kb each, it shouln't truncate not even corrupt
+func TestLargeKeyValue(t *testing.T) {
+	dir, err := os.MkdirTemp("", "gocask-test-large")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	cfg := Config{Dir: dir}
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	size := 64 * 1024
+	key := make([]byte, size)
+	val := make([]byte, size)
+	for i := 0; i < size; i++ {
+		key[i] = byte(i % 256)
+		val[i] = byte((i + 1) % 256)
+	}
+
+	if err := db.Put(key, val); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	got, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if !bytes.Equal(got, val) {
+		t.Error("Large value mismatch")
 	}
 }

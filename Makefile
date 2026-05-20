@@ -1,4 +1,6 @@
-.PHONY: test bench lint build
+.PHONY: all test bench lint build
+
+all: build lint test
 
 test:
 	go test ./... -race -v
